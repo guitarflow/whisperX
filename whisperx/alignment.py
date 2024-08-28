@@ -105,8 +105,7 @@ def align(
     device: str,
     interpolate_method: str = "nearest",
     return_char_alignments: bool = False,
-    print_progress: bool = False,
-    combined_progress: bool = False,
+    progress_callback = None
 ) -> AlignedTranscriptionResult:
     """
     Align phoneme recognition predictions to known transcription.
@@ -126,13 +125,13 @@ def align(
     model_type = align_model_metadata["type"]
 
     # 1. Preprocess to keep only characters in dictionary
+    preprocess_step_weight = 30 # This will take about 30% of the time so post the progress accordingly
     total_segments = len(transcript)
     for sdx, segment in enumerate(transcript):
         # strip spaces at beginning / end, but keep track of the amount.
-        if print_progress:
-            base_progress = ((sdx + 1) / total_segments) * 100
-            percent_complete = (50 + base_progress / 2) if combined_progress else base_progress
-            print(f"Progress: {percent_complete:.2f}%...")
+        if progress_callback:
+            percent_complete = ((sdx + 1) / total_segments) * preprocess_step_weight
+            progress_callback("Postprocessing", percent_complete, None)
             
         num_leading = len(segment["text"]) - len(segment["text"].lstrip())
         num_trailing = len(segment["text"]) - len(segment["text"].rstrip())
@@ -180,7 +179,7 @@ def align(
     
     # 2. Get prediction matrix from alignment model & align
     for sdx, segment in enumerate(transcript):
-        
+
         t1 = segment["start"]
         t2 = segment["end"]
         text = segment["text"]
@@ -345,6 +344,14 @@ def align(
         aligned_subsegments= aligned_subsegments.groupby(["start", "end"], as_index=False).agg(agg_dict)
         aligned_subsegments = aligned_subsegments.to_dict('records')
         aligned_segments += aligned_subsegments
+
+        if progress_callback:
+            percent_complete = ((sdx + 1) / total_segments) * (100-preprocess_step_weight) + preprocess_step_weight
+            cleaned_up_segments = [
+                {key: value for key, value in segment.items() if key != 'chars'}
+                for segment in aligned_subsegments
+            ]
+            progress_callback("Postprocessing", percent_complete, cleaned_up_segments)
 
     # create word_segments list
     word_segments: List[SingleWordSegment] = []

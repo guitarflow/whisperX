@@ -172,8 +172,7 @@ class FasterWhisperPipeline(Pipeline):
 
     def transcribe(
         self, audio: Union[str, np.ndarray], batch_size=None, num_workers=0, 
-        language=None, task=None, chunk_size=30, print_progress = False, combined_progress=False,
-        progress_callback=None
+        language=None, task=None, chunk_size=30, progress_callback=None
     ) -> TranscriptionResult:
         if isinstance(audio, str):
             audio = load_audio(audio)
@@ -186,8 +185,9 @@ class FasterWhisperPipeline(Pipeline):
                 yield {'inputs': audio[f1:f2]}
 
         if progress_callback:
-            progress_callback("Analyzing", -1, None)
+            progress_callback("Analyzing", -1)
 
+        print(" - Starting VAD ...")
         vad_segments = self.vad_model({"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": SAMPLE_RATE})
         vad_segments = merge_chunks(
             vad_segments,
@@ -195,6 +195,7 @@ class FasterWhisperPipeline(Pipeline):
             onset=self._vad_params["vad_onset"],
             offset=self._vad_params["vad_offset"],
         )
+        print(" - VAD done")
         if self.tokenizer is None:
             language = language or self.detect_language(audio)
             task = task or "transcribe"
@@ -220,6 +221,7 @@ class FasterWhisperPipeline(Pipeline):
         segments: List[SingleSegment] = []
         batch_size = batch_size or self._batch_size
         total_segments = len(vad_segments)
+        print(" - Starting Transcription loop ...")
         for idx, out in enumerate(self.__call__(data(audio, vad_segments), batch_size=batch_size, num_workers=num_workers)):
             
             text = out['text']
@@ -233,14 +235,12 @@ class FasterWhisperPipeline(Pipeline):
                 }
             segments.append(newSegment)
 
-            if print_progress:
-                base_progress = ((idx + 1) / total_segments) * 100
-                percent_complete = base_progress / 2 if combined_progress else base_progress
-                if progress_callback is None:
-                    print(f"Progress: {percent_complete:.2f}%...")
-                else:
-                    progress_callback("Transcribing", percent_complete, newSegment)
+            if progress_callback:
+                percent_complete = ((idx + 1) / total_segments) * 100
+                progress_callback("Transcribing", percent_complete)
 
+        print(" - Finished Transcription loop")
+        
         # revert the tokenizer if multilingual inference is enabled
         if self.preset_language is None:
             self.tokenizer = None
